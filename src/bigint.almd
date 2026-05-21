@@ -1,0 +1,214 @@
+import bytes
+
+// Unsigned arbitrary-precision integer arithmetic on Bytes (big-endian).
+//
+// Usage:
+//   import bigint
+//   let result = bigint.modpow(base, exp, modulus)
+
+// --- Comparison ---
+
+fn is_zero(a: Bytes) -> Bool = {
+  var zero = true
+  for i in 0..bytes.len(a) {
+    if bytes.read_u8(a, i) != 0 then { zero = false } else { () }
+  }
+  zero
+}
+
+fn compare(a: Bytes, b: Bytes) -> Int = {
+  let la = bytes.len(a)
+  let lb = bytes.len(b)
+  let max_len = if la > lb then la else lb
+  var result = 0
+  var i = 0
+  while i < max_len and result == 0 {
+    let va = if i < max_len - la then 0 else bytes.read_u8(a, i - (max_len - la))
+    let vb = if i < max_len - lb then 0 else bytes.read_u8(b, i - (max_len - lb))
+    if va > vb then { result = 1 } else if va < vb then { result = -1 } else { () }
+    i = i + 1
+  }
+  result
+}
+
+// --- Strip leading zeros ---
+
+fn strip(a: Bytes) -> Bytes = {
+  let len = bytes.len(a)
+  var start = 0
+  while start < len - 1 and bytes.read_u8(a, start) == 0 {
+    start = start + 1
+  }
+  if start == 0 then a else bytes.slice(a, start, len)
+}
+
+// --- Addition ---
+
+fn add(a: Bytes, b: Bytes) -> Bytes = {
+  let la = bytes.len(a)
+  let lb = bytes.len(b)
+  let max_len = if la > lb then la else lb
+  var result = bytes.new(max_len + 1)
+  var carry = 0
+  var i = 0
+  while i < max_len {
+    let va = if i < la then bytes.read_u8(a, la - 1 - i) else 0
+    let vb = if i < lb then bytes.read_u8(b, lb - 1 - i) else 0
+    let sum = va + vb + carry
+    result = bytes.set(result, max_len - i, int.band(sum, 0xFF))
+    carry = int.bshr(sum, 8)
+    i = i + 1
+  }
+  result = bytes.set(result, 0, carry)
+  strip(result)
+}
+
+// --- Subtraction (a - b, assumes a >= b) ---
+
+fn sub(a: Bytes, b: Bytes) -> Bytes = {
+  let la = bytes.len(a)
+  let lb = bytes.len(b)
+  var result = bytes.new(la)
+  var borrow = 0
+  var i = 0
+  while i < la {
+    let va = bytes.read_u8(a, la - 1 - i)
+    let vb = if i < lb then bytes.read_u8(b, lb - 1 - i) else 0
+    let diff = va - vb - borrow
+    if diff < 0 then {
+      result = bytes.set(result, la - 1 - i, int.band(diff + 256, 0xFF))
+      borrow = 1
+    } else {
+      result = bytes.set(result, la - 1 - i, diff)
+      borrow = 0
+    }
+    i = i + 1
+  }
+  strip(result)
+}
+
+// --- Multiplication ---
+
+fn mul(a: Bytes, b: Bytes) -> Bytes = {
+  let la = bytes.len(a)
+  let lb = bytes.len(b)
+  var result = bytes.new(la + lb)
+  for i in 0..la {
+    var carry = 0
+    let ai = bytes.read_u8(a, la - 1 - i)
+    for j in 0..lb {
+      let bj = bytes.read_u8(b, lb - 1 - j)
+      let pos = la + lb - 1 - i - j
+      let prod = ai * bj + bytes.read_u8(result, pos) + carry
+      result = bytes.set(result, pos, int.band(prod, 0xFF))
+      carry = int.bshr(prod, 8)
+    }
+    result = bytes.set(result, la + lb - 1 - i - lb, bytes.read_u8(result, la + lb - 1 - i - lb) + carry)
+  }
+  strip(result)
+}
+
+// --- Bit operations ---
+
+fn bit_len(a: Bytes) -> Int = {
+  let stripped = strip(a)
+  let len = bytes.len(stripped)
+  if len == 0 then 0
+  else {
+    let top = bytes.read_u8(stripped, 0)
+    var bits = (len - 1) * 8
+    var v = top
+    while v > 0 {
+      bits = bits + 1
+      v = int.bshr(v, 1)
+    }
+    bits
+  }
+}
+
+fn get_bit(a: Bytes, i: Int) -> Int = {
+  let len = bytes.len(a)
+  let byte_idx = len - 1 - i / 8
+  let bit_idx = i % 8
+  if byte_idx < 0 then 0
+  else int.band(int.bshr(bytes.read_u8(a, byte_idx), bit_idx), 1)
+}
+
+fn shift_left(a: Bytes, bits: Int) -> Bytes = {
+  let byte_shift = bits / 8
+  let bit_shift = bits % 8
+  let la = bytes.len(a)
+  var result = bytes.new(la + byte_shift + 1)
+  var carry = 0
+  var i = la - 1
+  while i >= 0 {
+    let val = int.bor(int.bshl(bytes.read_u8(a, i), bit_shift), carry)
+    result = bytes.set(result, i + 1, int.band(val, 0xFF))
+    carry = int.band(int.bshr(val, 8), 0xFF)
+    i = i - 1
+  }
+  result = bytes.set(result, 0, carry)
+  strip(result)
+}
+
+// --- Modular arithmetic ---
+
+fn rem(a: Bytes, n: Bytes) -> Bytes = {
+  if compare(a, n) < 0 then a
+  else {
+    let a_bits = bit_len(a)
+    let n_bits = bit_len(n)
+    var remainder = strip(bytes.slice(a, 0, bytes.len(a)))
+    var shift = a_bits - n_bits
+    while shift >= 0 {
+      let shifted_n = shift_left(n, shift)
+      if compare(remainder, shifted_n) >= 0 then {
+        remainder = sub(remainder, shifted_n)
+      } else { () }
+      shift = shift - 1
+    }
+    strip(remainder)
+  }
+}
+
+// Modular exponentiation: base^exp mod modulus (square-and-multiply).
+fn modpow(base: Bytes, exp: Bytes, modulus: Bytes) -> Bytes = {
+  var result = bytes.from_list([0x01])
+  var b = rem(base, modulus)
+  let exp_len = bytes.len(exp)
+  var byte_idx = exp_len - 1
+  while byte_idx >= 0 {
+    let byte_val = bytes.read_u8(exp, byte_idx)
+    for bit in 0..8 {
+      let bit_set = int.band(int.bshr(byte_val, bit), 1)
+      if bit_set == 1 then {
+        result = rem(mul(result, b), modulus)
+      } else { () }
+      b = rem(mul(b, b), modulus)
+    }
+    byte_idx = byte_idx - 1
+  }
+  result
+}
+
+// --- Convenience ---
+
+fn from_int(n: Int) -> Bytes = {
+  if n == 0 then bytes.from_list([0x00])
+  else {
+    var buf = bytes.new(0)
+    var v = n
+    while v > 0 {
+      bytes.push(buf, int.band(v, 0xFF))
+      v = int.bshr(v, 8)
+    }
+    // Reverse (push appends LSB first, we need big-endian)
+    let len = bytes.len(buf)
+    var result = bytes.new(len)
+    for i in 0..len {
+      result = bytes.set(result, i, bytes.read_u8(buf, len - 1 - i))
+    }
+    result
+  }
+}
+

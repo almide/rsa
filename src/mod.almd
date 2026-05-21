@@ -1,0 +1,127 @@
+import bytes
+import random
+import self.bigint
+
+// RSA PKCS1v15 encryption with DER public key parsing.
+//
+// Usage:
+//   import rsa
+//   let key = rsa.parse_der_public_key(der_bytes)
+//   let encrypted = rsa.encrypt(key, message)!
+
+type PublicKey = {
+  modulus: Bytes,
+  exponent: Bytes,
+}
+
+// --- DER/ASN.1 Parsing ---
+
+local fn der_read_tl(data: Bytes, offset: Int) -> { tag: Int, length: Int, header_size: Int } = {
+  let tag = bytes.read_u8(data, offset)
+  let len_byte = bytes.read_u8(data, offset + 1)
+  if len_byte < 0x80 then
+    { tag: tag, length: len_byte, header_size: 2 }
+  else {
+    let num_len_bytes = int.band(len_byte, 0x7F)
+    var length = 0
+    for i in 0..num_len_bytes {
+      length = int.bor(int.bshl(length, 8), bytes.read_u8(data, offset + 2 + i))
+    }
+    { tag: tag, length: length, header_size: 2 + num_len_bytes }
+  }
+}
+
+// Parse X.509 SubjectPublicKeyInfo (DER) → RSA public key.
+fn parse_der_public_key(der: Bytes) -> PublicKey = {
+  var pos = 0
+  let outer = der_read_tl(der, pos)
+  pos = pos + outer.header_size
+  let algo = der_read_tl(der, pos)
+  pos = pos + algo.header_size + algo.length
+  let bits = der_read_tl(der, pos)
+  pos = pos + bits.header_size + 1
+  let inner = der_read_tl(der, pos)
+  pos = pos + inner.header_size
+  let mod_tl = der_read_tl(der, pos)
+  pos = pos + mod_tl.header_size
+  let mod_start = if bytes.read_u8(der, pos) == 0 then pos + 1 else pos
+  let modulus = bytes.slice(der, mod_start, pos + mod_tl.length)
+  pos = pos + mod_tl.length
+  let exp_tl = der_read_tl(der, pos)
+  pos = pos + exp_tl.header_size
+  let exp_start = if bytes.read_u8(der, pos) == 0 and exp_tl.length > 1 then pos + 1 else pos
+  let exponent = bytes.slice(der, exp_start, pos + exp_tl.length)
+  { modulus: modulus, exponent: exponent }
+}
+
+// --- PKCS1v15 Padding ---
+
+effect fn pkcs1v15_pad(message: Bytes, key_size: Int) -> Bytes = {
+  let msg_len = bytes.len(message)
+  let pad_len = key_size - msg_len - 3
+  var padded = bytes.new(key_size)
+  padded = bytes.set(padded, 0, 0x00)
+  padded = bytes.set(padded, 1, 0x02)
+  for i in 0..pad_len {
+    padded = bytes.set(padded, 2 + i, random.int(1, 255))
+  }
+  padded = bytes.set(padded, 2 + pad_len, 0x00)
+  for i in 0..msg_len {
+    padded = bytes.set(padded, 3 + pad_len + i, bytes.read_u8(message, i))
+  }
+  padded
+}
+
+// --- RSA Encrypt ---
+
+effect fn encrypt(key: PublicKey, message: Bytes) -> Bytes = {
+  let key_size = bytes.len(key.modulus)
+  let padded = pkcs1v15_pad(message, key_size)!
+  let result = bigint.modpow(padded, key.exponent, key.modulus)
+  let result_len = bytes.len(result)
+  if result_len >= key_size then result
+  else {
+    var out = bytes.new(key_size)
+    let offset = key_size - result_len
+    for i in 0..result_len {
+      out = bytes.set(out, offset + i, bytes.read_u8(result, i))
+    }
+    out
+  }
+}
+
+// --- Tests ---
+
+test "DER parse - extract modulus and exponent" {
+  let key = parse_der_public_key(bytes.from_list([
+    0x30, 0x1F,
+      0x30, 0x0D,
+        0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01,
+        0x05, 0x00,
+      0x03, 0x0E, 0x00,
+        0x30, 0x0B,
+          0x02, 0x03, 0x01, 0x00, 0x01,
+          0x02, 0x04, 0x00, 0x01, 0x00, 0x01,
+  ]))
+  assert_eq(bytes.to_list(key.modulus), [0x01, 0x00, 0x01])
+  assert_eq(bytes.to_list(key.exponent), [0x01, 0x00, 0x01])
+}
+
+test "PKCS1v15 pad - correct structure" {
+  let msg = bytes.from_list([0x41, 0x42, 0x43])
+  let padded = pkcs1v15_pad(msg, 16)!
+  assert_eq(bytes.len(padded), 16)
+  assert_eq(bytes.read_u8(padded, 0), 0x00)
+  assert_eq(bytes.read_u8(padded, 1), 0x02)
+  assert_eq(bytes.read_u8(padded, 12), 0x00)
+  assert_eq(bytes.read_u8(padded, 13), 0x41)
+  assert_eq(bytes.read_u8(padded, 14), 0x42)
+  assert_eq(bytes.read_u8(padded, 15), 0x43)
+}
+
+test "PKCS1v15 pad - non-zero padding bytes" {
+  let padded = pkcs1v15_pad(bytes.from_list([0xFF]), 32)!
+  for i in 2..28 {
+    assert_ne(bytes.read_u8(padded, i), 0)
+  }
+}
