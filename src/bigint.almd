@@ -11,7 +11,7 @@ import bytes
 fn is_zero(a: Bytes) -> Bool = {
   var zero = true
   for i in 0..bytes.len(a) {
-    if bytes.read_u8(a, i) != 0 then { zero = false } else { () }
+    if (bytes.get(a, i) ?? 0) != 0 then { zero = false } else { () }
   }
   zero
 }
@@ -23,8 +23,8 @@ fn compare(a: Bytes, b: Bytes) -> Int = {
   var result = 0
   var i = 0
   while i < max_len and result == 0 {
-    let va = if i < max_len - la then 0 else bytes.read_u8(a, i - (max_len - la))
-    let vb = if i < max_len - lb then 0 else bytes.read_u8(b, i - (max_len - lb))
+    let va = if i < max_len - la then 0 else bytes.get(a, i - (max_len - la)) ?? 0
+    let vb = if i < max_len - lb then 0 else bytes.get(b, i - (max_len - lb)) ?? 0
     if va > vb then { result = 1 } else if va < vb then { result = -1 } else { () }
     i = i + 1
   }
@@ -36,7 +36,7 @@ fn compare(a: Bytes, b: Bytes) -> Int = {
 fn strip(a: Bytes) -> Bytes = {
   let len = bytes.len(a)
   var start = 0
-  while start < len - 1 and bytes.read_u8(a, start) == 0 {
+  while start < len - 1 and bytes.get(a, start) ?? 0 == 0 {
     start = start + 1
   }
   if start == 0 then a else bytes.slice(a, start, len)
@@ -48,12 +48,12 @@ fn add(a: Bytes, b: Bytes) -> Bytes = {
   let la = bytes.len(a)
   let lb = bytes.len(b)
   let max_len = if la > lb then la else lb
-  var result = bytes.new(max_len + 1)
+  var result = bytes.zeros(max_len + 1)
   var carry = 0
   var i = 0
   while i < max_len {
-    let va = if i < la then bytes.read_u8(a, la - 1 - i) else 0
-    let vb = if i < lb then bytes.read_u8(b, lb - 1 - i) else 0
+    let va = if i < la then bytes.get(a, la - 1 - i) ?? 0 else 0
+    let vb = if i < lb then bytes.get(b, lb - 1 - i) ?? 0 else 0
     let sum = va + vb + carry
     result = bytes.set(result, max_len - i, int.band(sum, 0xFF))
     carry = int.bshr(sum, 8)
@@ -68,12 +68,12 @@ fn add(a: Bytes, b: Bytes) -> Bytes = {
 fn sub(a: Bytes, b: Bytes) -> Bytes = {
   let la = bytes.len(a)
   let lb = bytes.len(b)
-  var result = bytes.new(la)
+  var result = bytes.zeros(la)
   var borrow = 0
   var i = 0
   while i < la {
-    let va = bytes.read_u8(a, la - 1 - i)
-    let vb = if i < lb then bytes.read_u8(b, lb - 1 - i) else 0
+    let va = bytes.get(a, la - 1 - i) ?? 0
+    let vb = if i < lb then bytes.get(b, lb - 1 - i) ?? 0 else 0
     let diff = va - vb - borrow
     if diff < 0 then {
       result = bytes.set(result, la - 1 - i, int.band(diff + 256, 0xFF))
@@ -92,18 +92,18 @@ fn sub(a: Bytes, b: Bytes) -> Bytes = {
 fn mul(a: Bytes, b: Bytes) -> Bytes = {
   let la = bytes.len(a)
   let lb = bytes.len(b)
-  var result = bytes.new(la + lb)
+  var result = bytes.zeros(la + lb)
   for i in 0..la {
     var carry = 0
-    let ai = bytes.read_u8(a, la - 1 - i)
+    let ai = bytes.get(a, la - 1 - i) ?? 0
     for j in 0..lb {
-      let bj = bytes.read_u8(b, lb - 1 - j)
+      let bj = bytes.get(b, lb - 1 - j) ?? 0
       let pos = la + lb - 1 - i - j
-      let prod = ai * bj + bytes.read_u8(result, pos) + carry
+      let prod = ai * bj + bytes.get(result, pos) ?? 0 + carry
       result = bytes.set(result, pos, int.band(prod, 0xFF))
       carry = int.bshr(prod, 8)
     }
-    result = bytes.set(result, la + lb - 1 - i - lb, bytes.read_u8(result, la + lb - 1 - i - lb) + carry)
+    result = bytes.set(result, la + lb - 1 - i - lb, bytes.get(result, la + lb - 1 - i - lb) ?? 0 + carry)
   }
   strip(result)
 }
@@ -115,7 +115,7 @@ fn bit_len(a: Bytes) -> Int = {
   let len = bytes.len(stripped)
   if len == 0 then 0
   else {
-    let top = bytes.read_u8(stripped, 0)
+    let top = bytes.get(stripped, 0) ?? 0
     var bits = (len - 1) * 8
     var v = top
     while v > 0 {
@@ -131,18 +131,18 @@ fn get_bit(a: Bytes, i: Int) -> Int = {
   let byte_idx = len - 1 - i / 8
   let bit_idx = i % 8
   if byte_idx < 0 then 0
-  else int.band(int.bshr(bytes.read_u8(a, byte_idx), bit_idx), 1)
+  else int.band(int.bshr(bytes.get(a, byte_idx) ?? 0, bit_idx), 1)
 }
 
 fn shift_left(a: Bytes, bits: Int) -> Bytes = {
   let byte_shift = bits / 8
   let bit_shift = bits % 8
   let la = bytes.len(a)
-  var result = bytes.new(la + byte_shift + 1)
+  var result = bytes.zeros(la + byte_shift + 1)
   var carry = 0
   var i = la - 1
   while i >= 0 {
-    let val = int.bor(int.bshl(bytes.read_u8(a, i), bit_shift), carry)
+    let val = int.bor(int.bshl(bytes.get(a, i) ?? 0, bit_shift), carry)
     result = bytes.set(result, i + 1, int.band(val, 0xFF))
     carry = int.band(int.bshr(val, 8), 0xFF)
     i = i - 1
@@ -178,7 +178,7 @@ fn modpow(base: Bytes, exp: Bytes, modulus: Bytes) -> Bytes = {
   let exp_len = bytes.len(exp)
   var byte_idx = exp_len - 1
   while byte_idx >= 0 {
-    let byte_val = bytes.read_u8(exp, byte_idx)
+    let byte_val = bytes.get(exp, byte_idx) ?? 0
     for bit in 0..8 {
       let bit_set = int.band(int.bshr(byte_val, bit), 1)
       if bit_set == 1 then {
@@ -196,7 +196,7 @@ fn modpow(base: Bytes, exp: Bytes, modulus: Bytes) -> Bytes = {
 fn from_int(n: Int) -> Bytes = {
   if n == 0 then bytes.from_list([0x00])
   else {
-    var buf = bytes.new(0)
+    var buf = bytes.zeros(0)
     var v = n
     while v > 0 {
       bytes.push(buf, int.band(v, 0xFF))
@@ -204,9 +204,9 @@ fn from_int(n: Int) -> Bytes = {
     }
     // Reverse (push appends LSB first, we need big-endian)
     let len = bytes.len(buf)
-    var result = bytes.new(len)
+    var result = bytes.zeros(len)
     for i in 0..len {
-      result = bytes.set(result, i, bytes.read_u8(buf, len - 1 - i))
+      result = bytes.set(result, i, bytes.get(buf, len - 1 - i) ?? 0)
     }
     result
   }
