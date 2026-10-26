@@ -24,7 +24,7 @@ local fn der_read_tl(data: Bytes, offset: Int) -> { tag: Int, length: Int, heade
   else {
     let num_len_bytes = int.band(len_byte, 0x7F)
     var length = 0
-    for i in 0..num_len_bytes {
+    for i in 0..<num_len_bytes {
       length = int.bor(int.bshl(length, 8), bytes.get(data, offset + 2 + i) ?? 0)
     }
     { tag: tag, length: length, header_size: 2 + num_len_bytes }
@@ -62,11 +62,11 @@ effect fn pkcs1v15_pad(message: Bytes, key_size: Int) -> Bytes = {
   var padded = bytes.zeros(key_size)
   padded = bytes.set(padded, 0, 0x00)
   padded = bytes.set(padded, 1, 0x02)
-  for i in 0..pad_len {
+  for i in 0..<pad_len {
     padded = bytes.set(padded, 2 + i, random.int(1, 255))
   }
   padded = bytes.set(padded, 2 + pad_len, 0x00)
-  for i in 0..msg_len {
+  for i in 0..<msg_len {
     padded = bytes.set(padded, 3 + pad_len + i, bytes.get(message, i) ?? 0)
   }
   padded
@@ -83,7 +83,7 @@ effect fn encrypt(key: PublicKey, message: Bytes) -> Bytes = {
   else {
     var out = bytes.zeros(key_size)
     let offset = key_size - result_len
-    for i in 0..result_len {
+    for i in 0..<result_len {
       out = bytes.set(out, offset + i, bytes.get(result, i) ?? 0)
     }
     out
@@ -121,7 +121,7 @@ test "PKCS1v15 pad - correct structure" {
 
 test "PKCS1v15 pad - non-zero padding bytes" {
   let padded = pkcs1v15_pad(bytes.from_list([0xFF]), 32)!
-  for i in 2..28 {
+  for i in 2..<28 {
     assert_ne(bytes.get(padded, i) ?? 0, 0)
   }
 }

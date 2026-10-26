@@ -10,7 +10,7 @@ import bytes
 
 fn is_zero(a: Bytes) -> Bool = {
   var zero = true
-  for i in 0..bytes.len(a) {
+  for i in 0..<bytes.len(a) {
     if (bytes.get(a, i) ?? 0) != 0 then { zero = false } else { () }
   }
   zero
@@ -93,10 +93,10 @@ fn mul(a: Bytes, b: Bytes) -> Bytes = {
   let la = bytes.len(a)
   let lb = bytes.len(b)
   var result = bytes.zeros(la + lb)
-  for i in 0..la {
+  for i in 0..<la {
     var carry = 0
     let ai = bytes.get(a, la - 1 - i) ?? 0
-    for j in 0..lb {
+    for j in 0..<lb {
       let bj = bytes.get(b, lb - 1 - j) ?? 0
       let pos = la + lb - 1 - i - j
       let prod = ai * bj + bytes.get(result, pos) ?? 0 + carry
@@ -179,7 +179,7 @@ fn modpow(base: Bytes, exp: Bytes, modulus: Bytes) -> Bytes = {
   var byte_idx = exp_len - 1
   while byte_idx >= 0 {
     let byte_val = bytes.get(exp, byte_idx) ?? 0
-    for bit in 0..8 {
+    for bit in 0..<8 {
       let bit_set = int.band(int.bshr(byte_val, bit), 1)
       if bit_set == 1 then {
         result = rem(mul(result, b), modulus)
@@ -205,7 +205,7 @@ fn from_int(n: Int) -> Bytes = {
     // Reverse (push appends LSB first, we need big-endian)
     let len = bytes.len(buf)
     var result = bytes.zeros(len)
-    for i in 0..len {
+    for i in 0..<len {
       result = bytes.set(result, i, bytes.get(buf, len - 1 - i) ?? 0)
     }
     result
